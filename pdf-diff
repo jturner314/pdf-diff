@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# based on http://stackoverflow.com/questions/6469157/pdf-compare-on-linux-command-line
+
+# If any commands fail, then exit immediately.
+set -e
+
+# Check that all three arguments are provided.
+if [[ "$#" -ne 3 ]]; then
+    echo "usage: pdf-diff orig new diff"
+    exit 1
+fi
+
+# Copy the positional arguments into variables.
+orig="$1"
+new="$2"
+diff="$3"
+
+# Set the density for the diff from the environment or default.
+DENSITY="${DENSITY:-150x150}"
+
+# Make a temporary directory for working files.
+tmpdir="$(mktemp -d)"
+
+# Double check that the temporary directory was created successfully.
+if [[ ! -d "$tmpdir" ]]; then
+    echo "Failed to create temporary directory." 1>2
+    exit 1
+fi
+
+# Make directories for the pages of each file.
+mkdir "${tmpdir}/orig" "${tmpdir}/new" "${tmpdir}/diff"
+
+# Burst the PDF files into the directories.
+pdftk "$orig" burst output "${tmpdir}/orig/page_%04d.pdf"
+pdftk "$new" burst output "${tmpdir}/new/page_%04d.pdf"
+
+# Make sure the PDF files had the same number of pages.
+if [[ $(ls -1 "${tmpdir}/orig" | wc -l) -ne $(ls -1 "${tmpdir}/new" | wc -l) ]]; then
+    echo "Different number of pages in the two files. Exiting..." 1>2
+    rm -rf -- "${tmpdir}"
+    exit 1
+fi
+
+# Create the difference pages.
+for origfile in "${tmpdir}"/orig/page_*.pdf; do
+    base=$(basename "$origfile")
+    if compare -density "${DENSITY}" "${tmpdir}/orig/${base}" "${tmpdir}/new/${base}" -compose src "${tmpdir}/diff/${base}"; then
+        echo "Success: ${base}"
+    else
+        echo "Failure: ${base}"
+    fi
+done
+
+# Concatenate the difference pages into the desired output document.
+pdftk "${tmpdir}"/diff/page_*.pdf cat output "$diff"
+
+# Remove the temporary directory.
+rm -rf -- "${tmpdir}"
